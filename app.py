@@ -2,7 +2,7 @@ import datetime as dt
 import os
 import streamlit as st
 from memo_engine import (BRAND_CONFIG, initial_state, read_memo, local_parse, ai_parse,
-                         validate_state, generate_memo, check_source_brand, BrandMismatch)
+                         validate_state, generate_memo, check_source_brand, BrandMismatch, RecognitionError)
 
 st.set_page_config(page_title='促销 Memo 生成器', page_icon='👓', layout='centered')
 CSS='''<style>
@@ -67,8 +67,8 @@ def main():
                 a1=st.file_uploader('A1 海报',type=['png','jpg','jpeg'],key='a1',label_visibility='collapsed')
         image=a1.getvalue() if a1 else None
         recognize=st.button('识别并核对 →',type='primary',use_container_width=True)
-        with st.expander('其他方式（沿用已有 Memo）'):
-            st.file_uploader('在已有 Memo 上修改（选填）',type=['pptx'],key='source_upload',
+        with st.expander('其他方式'):
+            st.file_uploader('沿用已有 Memo（选填）',type=['pptx'],key='source_upload',
                 help='以此文件为底稿，保留其他手工调整。')
             manual=st.button('跳过识别，手动填写',use_container_width=True)
         if recognize or manual:
@@ -89,14 +89,20 @@ def main():
                 warning=''
                 if recognize and api_key() and (wording.strip() or image):
                     try:
-                        with st.spinner('正在识别素材中的日期、优惠和适用门店…'):
-                            state=ai_parse(api_key(),brand,state,wording,image,a1.type if a1 else 'image/jpeg')
+                        status=st.empty()
+                        try:
+                            with st.spinner('正在识别素材…'):
+                                state=ai_parse(api_key(),brand,state,wording,image,a1.type if a1 else 'image/jpeg',
+                                               on_status=lambda message:status.info(message))
+                        finally:status.empty()
                         image_read=bool(image)
                         st.session_state.parse_note='已提取素材信息。请核对日期、优惠和门店范围。'
                     except BrandMismatch as exc:
                         st.error(str(exc));st.session_state.review=False;return
+                    except RecognitionError as exc:
+                        warning=str(exc)+(' A1 尚未识别，当前没有自动更新海报内容。' if image else '')
                     except Exception:
-                        warning='智能识别暂不可用。'+('A1 尚未识别，请手动核对日期、优惠和门店范围。' if image else '请手动核对未识别字段。')
+                        warning='识别流程出现异常，请联系维护人员检查部署版本。'
                 elif recognize and (wording.strip() or image):
                     warning='未配置智能识别。'+('A1 尚未识别，请手动核对日期、优惠和门店范围。' if image else '仅提取明确日期和标注字段。')
                 else:
