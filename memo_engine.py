@@ -16,7 +16,7 @@ BRAND_CONFIG = {
     "Oakley 欧克利 (OO)": {
         "code": "OO",
         "candidate_files": [
-            "templates/OO.pptx",
+            "OO.pptx",
             "OO.pptx",
             "20260327 OO promo memo.pptx",
             "20260227 OO promo memo.pptx",
