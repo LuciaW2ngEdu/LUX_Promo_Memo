@@ -357,6 +357,48 @@ def set_text(tf, text):
     replace_paragraph(p, text)
 
 
+
+def set_summary(tf, period, promo):
+    """Keep the template's date and offer run styles instead of flattening them."""
+    paragraph=tf.paragraphs[0]
+    runs=list(paragraph.runs)
+    date_style=deepcopy(runs[0]._r.rPr) if runs and runs[0]._r.rPr is not None else None
+    split_index=next((i for i,r in enumerate(runs) if '期间' in r.text),0)
+    offer_run=runs[min(split_index+1,len(runs)-1)] if runs else None
+    offer_style=deepcopy(offer_run._r.rPr) if offer_run is not None and offer_run._r.rPr is not None else deepcopy(date_style)
+    paragraph.clear()
+    for text,style in [(period+' 期间，',date_style),(promo,offer_style)]:
+        run=paragraph.add_run()
+        if style is not None:run._r.append(style)
+        run.text=text
+    for extra in list(tf.paragraphs)[1:]:tf._txBody.remove(extra._p)
+
+
+def fit_summary(table):
+    """Use the original run fonts at their original sizes whenever they fit."""
+    from pptx.enum.text import MSO_AUTO_SIZE
+    cell=table.cell(2,1);tf=cell.text_frame
+    width=sum(table.columns[i].width for i in range(1,1+cell.span_width))
+    usable_w=(width-cell.margin_left-cell.margin_right)/12700-2
+    usable_h=(table.rows[2].height-cell.margin_top-cell.margin_bottom)/12700-1
+    paragraph=tf.paragraphs[0]
+    originals=[r.font.size.pt if r.font.size is not None else 13 for r in paragraph.runs]
+    scale=1.0
+    while scale>=.6:
+        sizes=[size*scale for size in originals]
+        maximum=max(sizes,default=13)
+        count=estimated_lines(paragraph.text,usable_w*.96,maximum)
+        if count*maximum*1.08<=usable_h:break
+        scale-=.025
+    else:
+        raise ValueError('主要内容过长，请缩短优惠简述。')
+    for run,size in zip(paragraph.runs,originals):run.font.size=Pt(round(size*scale,2))
+    paragraph.line_spacing=1.0
+    paragraph.space_before=Pt(0);paragraph.space_after=Pt(0)
+    tf.auto_size=MSO_AUTO_SIZE.NONE
+    tf.word_wrap=True
+
+
 def set_lines(tf, lines):
     samples = [deepcopy(p._p) for p in tf.paragraphs]
     for p in list(tf.paragraphs): tf._txBody.remove(p._p)
@@ -384,7 +426,9 @@ def composed_terms(state, brand):
             clause=clean_number(clause)
             if clause and not any(w in clause for w in ('单笔交易','不叠加','不可与店内','活动仅限','上述优惠仅限','详情请咨询','详询门店')):
                 if clause not in cleaned: cleaned.append(clause)
-        if cleaned: parts.append(''.join(cleaned))
+        if cleaned:
+            if key=='rule_sentence' and BRAND_CONFIG[brand]['code']!='SGH':parts.extend(cleaned)
+            else:parts.append(''.join(cleaned))
     # Keep SGH's date / offer and exclusions / transaction / legal structure.
     if BRAND_CONFIG[brand]['code']=='SGH':
         if parts: lines.append('；'.join(t.rstrip('。；;') for t in parts)+'。')
@@ -503,7 +547,7 @@ def generate_memo(brand, state, source=None, baseline=None, a1=None, progress=No
     dot=f'{s.year}.{s.month}.{s.day} – '+(f'{e.year}.' if end_full else '')+f'{e.month}.{e.day}'
     dates_changed=bool(changed & {'start_date','end_date'})
     terms_changed=dates_changed or bool(changed & {'rule_sentence','exclusion_clause','transaction_clause','legal_clause','exclude_outlets'})
-    if source is None or terms_changed:
+    if source is None or terms_changed or 'short_promo' in changed:
         # Several original files have a zero-height main-content row. Letting
         # Office expand it at open time causes the nested offer table to overlap.
         overview.rows[2].height=max(overview.rows[2].height,Pt(24))
@@ -531,7 +575,7 @@ def generate_memo(brand, state, source=None, baseline=None, a1=None, progress=No
         for sh in prs.slides[-1].shapes:
             if sh.has_text_frame and '陈列时间' in sh.text: set_text(sh.text_frame,'陈列时间：'+period)
     if dates_changed or 'short_promo' in changed:
-        set_text(overview.cell(2,1).text_frame,f'{dot} 期间，{state["short_promo"]}')
+        set_summary(overview.cell(2,1).text_frame,dot,state['short_promo'])
     if changed & {'store_scope','exclude_outlets'}:
         set_text(overview.cell(0,4).text_frame,normalize_scope(state['store_scope'],state['exclude_outlets']))
     for key, col in [('discount_code',1),('store_code_scope',2)]:
@@ -565,17 +609,25 @@ def generate_memo(brand, state, source=None, baseline=None, a1=None, progress=No
         for sh in prs.slides[-1].shapes:
             if sh.has_text_frame and '陈列时间' in sh.text:
                 fit_text(sh.text_frame,sh.width,sh.height,'陈列日期',16,9)
-    if dates_changed or 'short_promo' in changed: fit_cell(overview,2,1,'主要优惠',12.5,9)
+    if dates_changed or 'short_promo' in changed: fit_summary(overview)
     if changed & {'store_scope','exclude_outlets'}: fit_cell(overview,0,4,'参与门店',12,8)
     for key,col in [('discount_code',1),('store_code_scope',2)]:
         if key in changed: fit_cell(detail,1,col,'优惠表格',12,8)
     if terms_changed:
         from pptx.enum.text import MSO_ANCHOR
-        detail.cell(1,4).vertical_anchor=MSO_ANCHOR.TOP
-        for p in detail.cell(1,4).text_frame.paragraphs:
+        detail.cell(1,4).vertical_anchor=MSO_ANCHOR.MIDDLE
+        detail.cell(1,4).text_frame.vertical_anchor=MSO_ANCHOR.MIDDLE
+        from pptx.oxml.xmlchemy import OxmlElement
+        for index,p in enumerate(detail.cell(1,4).text_frame.paragraphs,1):
             ppr=p._p.get_or_add_pPr()
-            for tag in ('a:buAutoNum','a:buChar'):
-                for child in list(ppr.findall(tag, ppr.nsmap)): ppr.remove(child)
+            for tag in ('a:buAutoNum','a:buChar','a:buNone'):
+                for child in list(ppr.findall(tag,ppr.nsmap)):ppr.remove(child)
+            numbering=OxmlElement('a:buAutoNum')
+            numbering.set('type','arabicPeriod')
+            numbering.set('startAt',str(index))
+            ppr.append(numbering)
+            ppr.set('marL',str(int(Pt(15))))
+            ppr.set('indent',str(-int(Pt(15))))
         fit_cell(detail,1,4,'使用条款',10.5,8)
     report(.65,'正在处理两处 A1 海报…')
     count=0
