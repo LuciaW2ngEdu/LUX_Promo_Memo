@@ -30,13 +30,14 @@ def date_value(value):
 def main():
     st.markdown(CSS,unsafe_allow_html=True)
     st.title('👓 促销 Memo 生成器')
-    st.caption('文案或 A1 均可，核对后生成门店 PPT。')
     with st.container(border=True):
-        st.subheader('1 · 活动与素材')
-        brand=st.selectbox('品牌',list(BRAND_CONFIG),key='brand')
-        with st.expander('继续修改已有 Memo（选填）'):
-            st.caption('以这份 PPT 为底稿，保留其他手工调整；不上传则使用品牌标准版。')
-            ppt=st.file_uploader('已有 Memo',type=['pptx'],key='source_upload')
+        st.subheader('1 · 活动信息')
+        brand_col,festival_col=st.columns([1,1])
+        with brand_col:
+            brand=st.selectbox('品牌',list(BRAND_CONFIG),key='brand')
+        # Uploaded widgets update session_state before a rerun. Read the bottom
+        # advanced control here so importing a Memo can populate the top fields.
+        ppt=st.session_state.get('source_upload')
         source=ppt.getvalue() if ppt else None
         source_id=(brand,source)
         if st.session_state.get('source_id')!=source_id:
@@ -49,18 +50,27 @@ def main():
             st.session_state.review=False
             st.session_state.festival_input=state['festival']
             reset_editor()
-        festival=st.text_input('节日 / 档期（必填）',key='festival_input',placeholder='如：女神节、超级周末；填写实际档期')
+        with festival_col:
+            festival=st.text_input('节日 / 档期',key='festival_input',placeholder='如：女神节、超级周末')
         st.session_state.memo['festival']=festival.strip()
         required_message=st.empty()
-        st.caption('下面两项至少提供一项，也可一起提交。A1 未出图时先用文案，后续可补图。')
-        a1=st.file_uploader('上传 A1 海报（可单独提交）',type=['png','jpg','jpeg'],key='a1')
-        wording=st.text_area('粘贴促销文案 / 修改意见（只传 A1 时可留空）',height=100,key='wording',
-            placeholder='粘贴 wording，或输入“活动结束日期改为……”“优惠不适用于……”。')
+        method=st.radio('素材来源',['上传 A1','粘贴文案'],horizontal=True,key='input_method')
+        if method=='上传 A1':
+            a1=st.file_uploader('A1 海报',type=['png','jpg','jpeg'],key='a1',label_visibility='collapsed')
+            with st.expander('补充文案 / 修改意见'):
+                wording=st.text_area('文案 / 修改意见',height=100,key='wording',
+                    placeholder='粘贴活动 wording 或修改要求。',label_visibility='collapsed')
+        else:
+            wording=st.text_area('文案 / 修改意见',height=100,key='wording',
+                placeholder='粘贴活动 wording 或修改要求。',label_visibility='collapsed')
+            with st.expander('同时上传 A1（选填）'):
+                a1=st.file_uploader('A1 海报',type=['png','jpg','jpeg'],key='a1',label_visibility='collapsed')
         image=a1.getvalue() if a1 else None
-        st.caption('上传新 A1 后会识别日期、优惠及门店范围，核对后同步更新 PPT 和海报。')
-        c1,c2=st.columns([2,1])
-        with c1: recognize=st.button('识别并核对 →',type='primary',use_container_width=True)
-        with c2: manual=st.button('手动填写',use_container_width=True)
+        recognize=st.button('识别并核对 →',type='primary',use_container_width=True)
+        with st.expander('其他方式'):
+            st.file_uploader('沿用已有 Memo（选填）',type=['pptx'],key='source_upload',
+                help='以此文件为底稿，保留其他手工调整。')
+            manual=st.button('跳过识别，手动填写',use_container_width=True)
         if recognize or manual:
             st.session_state.pop('output',None)
             if not festival.strip():
