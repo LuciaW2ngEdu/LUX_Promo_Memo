@@ -68,7 +68,7 @@ def main():
         image=a1.getvalue() if a1 else None
         recognize=st.button('识别并核对 →',type='primary',use_container_width=True)
         with st.expander('其他方式（沿用已有 Memo）'):
-            st.file_uploader('沿用已有 Memo（选填）',type=['pptx'],key='source_upload',
+            st.file_uploader('在已有 Memo 上修改（选填）',type=['pptx'],key='source_upload',
                 help='以此文件为底稿，保留其他手工调整。')
             manual=st.button('跳过识别，手动填写',use_container_width=True)
         if recognize or manual:
