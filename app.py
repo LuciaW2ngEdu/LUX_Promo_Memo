@@ -4,138 +4,138 @@ import io
 import json
 import os
 import re
+import time
 import streamlit as st
 from pptx import Presentation
 from openai import OpenAI
 
 st.set_page_config(
-    page_title="促销 Memo 工作台",
+    page_title="促销 Memo 生成器",
     page_icon="👓",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NL = chr(10)
 
-# 注入极简高级定制 CSS
 CUSTOM_CSS = """
 <style>
-    /* 隐藏默认顶部装饰条与多余菜单 */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
     [data-testid="collapsedControl"] {display: none;}
 
-    /* 整体背景与容器间距 */
     .stApp {
-        background-color: #F7F8FA;
+        background-color: #F6F7F9;
     }
     .block-container {
-        padding-top: 2.2rem !important;
-        padding-bottom: 2.5rem !important;
-        max-width: 1180px !important;
+        padding-top: 2rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 780px !important;
     }
 
-    /* 顶部标题栏 */
-    .studio-header {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        margin-bottom: 1.4rem;
-        padding-bottom: 0.8rem;
-        border-bottom: 1px solid #E6E8EC;
+    /* 顶部标题 */
+    .hero-box {
+        text-align: center;
+        margin-bottom: 1.5rem;
     }
-    .studio-title {
+    .hero-title {
         font-size: 1.65rem;
         font-weight: 700;
         color: #111827;
+        margin-bottom: 0.3rem;
         letter-spacing: -0.02em;
-        margin: 0;
     }
-    .studio-subtitle {
-        font-size: 0.88rem;
+    .hero-desc {
+        font-size: 0.9rem;
         color: #6B7280;
-        margin-left: 0.75rem;
-        font-weight: 400;
     }
 
-    /* 卡片容器美化 */
+    /* 白色主卡片 */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #FFFFFF;
-        border: 1px solid #EAECEF !important;
-        border-radius: 14px !important;
-        padding: 1.35rem 1.5rem !important;
-        box-shadow: 0 2px 10px rgba(17, 24, 39, 0.03);
+        border: 1px solid #E5E7EB !important;
+        border-radius: 16px !important;
+        padding: 1.5rem 1.6rem !important;
+        box-shadow: 0 4px 16px rgba(17, 24, 39, 0.04);
     }
 
-    /* 卡片小标题 */
-    .card-title {
-        font-size: 1.02rem;
-        font-weight: 600;
-        color: #1F2937;
-        margin-bottom: 0.9rem;
-        display: flex;
-        align-items: center;
-        gap: 0.45rem;
-    }
-    .step-badge {
-        background: #111827;
-        color: #FFFFFF;
-        font-size: 0.72rem;
-        font-weight: 600;
-        padding: 2px 8px;
-        border-radius: 99px;
-        letter-spacing: 0.03em;
-    }
-
-    /* 表单标签精简美化 */
     label[data-testid="stWidgetLabel"] p {
-        font-size: 0.84rem !important;
-        font-weight: 500 !important;
-        color: #374151 !important;
+        font-size: 0.88rem !important;
+        font-weight: 600 !important;
+        color: #1F2937 !important;
     }
 
-    /* 按钮圆角与质感 */
     .stButton > button, .stDownloadButton > button {
         border-radius: 10px !important;
         font-weight: 600 !important;
-        padding: 0.55rem 1rem !important;
-        transition: all 0.15s ease-in-out !important;
+        padding: 0.65rem 1.1rem !important;
+        font-size: 0.95rem !important;
     }
     .stDownloadButton > button {
-        background-color: #111827 !important;
+        background-color: #059669 !important;
         color: #FFFFFF !important;
         border: none !important;
-        box-shadow: 0 4px 12px rgba(17, 24, 39, 0.12) !important;
+        box-shadow: 0 4px 12px rgba(5, 150, 105, 0.2) !important;
     }
     .stDownloadButton > button:hover {
-        background-color: #1F2937 !important;
-        transform: translateY(-1px);
+        background-color: #047857 !important;
     }
 
-    /* 日期联动预览条 */
-    .date-pill-bar {
-        background: #F3F4F6;
-        border-radius: 8px;
-        padding: 0.45rem 0.75rem;
-        font-size: 0.78rem;
-        color: #4B5563;
-        margin-top: -0.2rem;
-        margin-bottom: 0.85rem;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.8rem;
+    /* 生成结果摘要卡片 */
+    .result-card {
+        background: #F0FDF4;
+        border: 1px solid #BBF7D0;
+        border-radius: 12px;
+        padding: 1rem 1.2rem;
+        margin-top: 0.5rem;
+        margin-bottom: 1rem;
     }
-    .date-pill-bar span {
+    .result-header {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #065F46;
+        margin-bottom: 0.55rem;
+    }
+    .result-grid {
+        display: grid;
+        grid-template-columns: 95px 1fr;
+        row-gap: 0.35rem;
+        font-size: 0.85rem;
+        color: #374151;
+    }
+    .result-label {
+        color: #6B7280;
+        font-weight: 500;
+    }
+    .result-val {
         color: #111827;
         font-weight: 500;
+    }
+    .a1-tag-ok {
+        display: inline-block;
+        background: #D1FAE5;
+        color: #065F46;
+        font-size: 0.78rem;
+        padding: 1px 8px;
+        border-radius: 99px;
+        font-weight: 600;
+    }
+    .a1-tag-wait {
+        display: inline-block;
+        background: #FEF3C7;
+        color: #92400E;
+        font-size: 0.78rem;
+        padding: 1px 8px;
+        border-radius: 99px;
+        font-weight: 600;
     }
 </style>
 """
 
 BRAND_CONFIG = {
-    "Oakley 欧克利": {
+    "Oakley 欧克利 (OO)": {
         "code": "OO",
         "candidate_files": [
             "templates/OO.pptx",
@@ -172,7 +172,7 @@ BRAND_CONFIG = {
         "default_short_promo": "两件75折。",
         "default_badge_promo": "两件75折",
     },
-    "Ray-Ban 雷朋": {
+    "Ray-Ban 雷朋 (RB)": {
         "code": "RB",
         "candidate_files": [
             "templates/RB.pptx",
@@ -190,7 +190,7 @@ BRAND_CONFIG = {
         "default_short_promo": "两件75折",
         "default_badge_promo": "两件75折",
     },
-    "LensCrafters 亮视点": {
+    "LensCrafters 亮视点 (LC)": {
         "code": "LC",
         "candidate_files": [
             "templates/LC.pptx",
@@ -217,7 +217,6 @@ MONTH_ABBR = {
 
 
 def get_backend_api_key() -> str:
-    """静默从后台 Secrets 或环境变量读取密钥，不在前端暴露任何配置项"""
     try:
         key = st.secrets.get("ECNU_API_KEY", "")
         if key:
@@ -234,7 +233,7 @@ def resolve_template_path(cfg: dict) -> str:
             return full_p
         if os.path.exists(rel_path):
             return rel_path
-    raise FileNotFoundError(f"未找到 {cfg['code']} 模板文件，请检查仓库中的模板。")
+    raise FileNotFoundError(f"未找到 {cfg['code']} 品牌的 PPT 母版文件，请检查仓库中的 templates 目录。")
 
 
 def set_paragraph_text_preserve_style(paragraph, new_text):
@@ -371,7 +370,7 @@ def generate_memo_pptx(
                         e_clean = exclusion_clause.strip()
                         set_paragraph_text_preserve_style(tf.paragraphs[1], f"{r_clean}，{e_clean}")
 
-    # 最后一页: 陈列指引与A1海报图
+    # 最后一页: 陈列指引与A1海报图（若未上传新图，保留母版默认占位图）
     last_slide = prs.slides[-1]
     for sh in last_slide.shapes:
         if sh.has_text_frame and "陈列时间" in sh.text_frame.text:
@@ -403,6 +402,7 @@ def smart_parse_with_ai(
     client = OpenAI(
         api_key=api_key,
         base_url="https://chat.ecnu.edu.cn/open/api/v1",
+        timeout=25.0,
     )
 
     system_prompt = """你是一个专业的眼镜零售营销 Memo 数据提取与修改助手。
@@ -435,7 +435,6 @@ def smart_parse_with_ai(
             "image_url": {"url": f"data:{a1_mime};base64,{b64_img}"}
         })
 
-    # 默认优先使用支持多模态且响应快的 ecnu-plus，若异常自动切换 ecnu-max
     last_err = None
     for model_name in ["ecnu-plus", "ecnu-max"]:
         try:
@@ -475,61 +474,57 @@ def local_regex_parse(user_input_text: str, current_state: dict) -> dict:
 def main():
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-    # 极简顶部导航头
     st.markdown(
-        '<div class="studio-header">'
-        '<div><span class="studio-title">👓 促销 Memo 工作台</span>'
+        '<div class="hero-box">'
+        '<div class="hero-title">👓 促销 Memo 生成器</div>'
+        '<div class="hero-desc">选择品牌并输入文案或 A1 海报（二选一即可），一键生成标准门店 PPT</div>'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    col_left, col_right = st.columns([1, 1.25], gap="large")
+    with st.container(border=True):
+        b_col, f_col = st.columns([1.15, 1])
+        with b_col:
+            selected_brand = st.selectbox("1. 选择品牌", list(BRAND_CONFIG.keys()))
+            cfg = BRAND_CONFIG[selected_brand]
 
-    with col_left:
-        with st.container(border=True):
-            st.markdown(
-                '<div class="card-title"><span class="step-badge">STEP 1</span> 品牌与活动输入</div>',
-                unsafe_allow_html=True,
+        if "last_brand" not in st.session_state or st.session_state.last_brand != selected_brand:
+            st.session_state.last_brand = selected_brand
+            st.session_state.festival = st.session_state.get("festival", "清明节")
+            st.session_state.start_date = st.session_state.get("start_date", datetime.date(2026, 3, 27))
+            st.session_state.end_date = st.session_state.get("end_date", datetime.date(2026, 4, 6))
+            st.session_state.issue_month = f"{MONTH_ABBR[datetime.date.today().month]}, {datetime.date.today().year}"
+            st.session_state.short_promo = cfg["default_short_promo"]
+            st.session_state.badge_promo = cfg["default_badge_promo"]
+            st.session_state.discount_code = cfg["default_discount_code"]
+            st.session_state.rule_sentence = cfg["default_rule_sentence"]
+            st.session_state.exclusion_clause = cfg["default_Exclusion_clause"]
+            st.session_state.ready = True
+
+        with f_col:
+            festival_input = st.text_input(
+                "2. 活动节日名称",
+                value=st.session_state.festival,
+                placeholder="如：清明节、女神节、五一劳动节"
             )
+            st.session_state.festival = festival_input
 
-            b_col, f_col = st.columns([1.15, 1])
-            with b_col:
-                selected_brand = st.selectbox("选择品牌", list(BRAND_CONFIG.keys()))
-                cfg = BRAND_CONFIG[selected_brand]
+        smart_input = st.text_area(
+            "3. 粘贴促销 Wording 文字 或 输入修改意见（与下方 A1 海报二选一即可）",
+            height=115,
+            placeholder="方式 A：直接粘贴整段促销 Wording 文案\n方式 B：改版时直接输入修改要求，例如「活动延后到4月10日结束，去掉LNY系列」",
+        )
 
-            # 初始化或切换品牌时的默认状态
-            if "last_brand" not in st.session_state or st.session_state.last_brand != selected_brand:
-                st.session_state.last_brand = selected_brand
-                st.session_state.festival = st.session_state.get("festival", "清明节")
-                st.session_state.start_date = st.session_state.get("start_date", datetime.date(2026, 3, 27))
-                st.session_state.end_date = st.session_state.get("end_date", datetime.date(2026, 4, 6))
-                st.session_state.issue_month = f"{MONTH_ABBR[datetime.date.today().month]}, {datetime.date.today().year}"
-                st.session_state.short_promo = cfg["default_short_promo"]
-                st.session_state.badge_promo = cfg["default_badge_promo"]
-                st.session_state.discount_code = cfg["default_discount_code"]
-                st.session_state.rule_sentence = cfg["default_rule_sentence"]
-                st.session_state.exclusion_clause = cfg["default_Exclusion_clause"]
+        uploaded_a1 = st.file_uploader(
+            "4. 上传 A1 海报图片（选填：若暂未出图可不传，等供应商出图后再传图更新）",
+            type=["jpg", "jpeg", "png"],
+        )
 
-            with f_col:
-                festival_input = st.text_input(
-                    "活动档期 / 节日",
-                    value=st.session_state.festival,
-                    placeholder="如：清明节、女神节、五一"
-                )
-                st.session_state.festival = festival_input
-
-            uploaded_a1 = st.file_uploader(
-                "上传 A1 海报图（选填，将自动提取文字并替换末页陈列图）",
-                type=["jpg", "jpeg", "png"],
-            )
-
-            smart_input = st.text_area(
-                "粘贴活动 Wording 或直接输入修改要求",
-                height=135,
-                placeholder="可直接粘贴整段促销文案，或输入修改指令（例如：活动时间延后到4月10日，不参加系列加上LNY）...",
-            )
-
-            if st.button("✨ 智能识别并填入右侧", use_container_width=True):
+        if st.button("✨ 一键生成促销 Memo", use_container_width=True, type="primary"):
+            if not smart_input.strip() and not uploaded_a1:
+                st.warning("💡 请至少粘贴一段促销 Wording 文字、输入修改要求，或上传一张 A1 海报图片；若只需手动微调字段，可展开下方「手动微调细节」直接下载。")
+            else:
+                prog = st.progress(10, text="⏳ 正在读取输入内容 (10%)...")
                 current_state = {
                     "festival": st.session_state.festival,
                     "start_date": st.session_state.start_date.strftime("%Y-%m-%d"),
@@ -541,120 +536,150 @@ def main():
                     "exclusion_clause": st.session_state.exclusion_clause,
                 }
                 api_key = get_backend_api_key()
-                if api_key and (smart_input.strip() or uploaded_a1):
-                    with st.spinner("正在智能解析内容..."):
-                        try:
-                            img_bytes = uploaded_a1.getvalue() if uploaded_a1 else None
-                            img_mime = uploaded_a1.type if uploaded_a1 else "image/jpeg"
-                            res = smart_parse_with_ai(
-                                api_key=api_key,
-                                brand_key=selected_brand,
-                                current_state=current_state,
-                                user_input_text=smart_input,
-                                a1_image_bytes=img_bytes,
-                                a1_mime=img_mime,
-                            )
-                            st.session_state.festival = res.get("festival", st.session_state.festival)
-                            if res.get("start_date"):
-                                st.session_state.start_date = datetime.date.fromisoformat(res["start_date"])
-                            if res.get("end_date"):
-                                st.session_state.end_date = datetime.date.fromisoformat(res["end_date"])
-                            st.session_state.short_promo = res.get("short_promo", st.session_state.short_promo)
-                            st.session_state.badge_promo = res.get("badge_promo", st.session_state.badge_promo)
-                            st.session_state.discount_code = res.get("discount_code", st.session_state.discount_code)
-                            st.session_state.rule_sentence = res.get("rule_sentence", st.session_state.rule_sentence)
-                            st.session_state.exclusion_clause = res.get("exclusion_clause", st.session_state.exclusion_clause)
-                            st.rerun()
-                        except Exception:
-                            res = local_regex_parse(smart_input, current_state)
+                if api_key:
+                    try:
+                        prog.progress(45, text="🧠 正在智能提取活动时间与折扣条款 (45%)...")
+                        img_bytes = uploaded_a1.getvalue() if uploaded_a1 else None
+                        img_mime = uploaded_a1.type if uploaded_a1 else "image/jpeg"
+                        res = smart_parse_with_ai(
+                            api_key=api_key,
+                            brand_key=selected_brand,
+                            current_state=current_state,
+                            user_input_text=smart_input,
+                            a1_image_bytes=img_bytes,
+                            a1_mime=img_mime,
+                        )
+                        prog.progress(85, text="📝 正在同步更新全篇 PPT 日期与排版 (85%)...")
+                        st.session_state.festival = res.get("festival", st.session_state.festival)
+                        if res.get("start_date"):
                             st.session_state.start_date = datetime.date.fromisoformat(res["start_date"])
+                        if res.get("end_date"):
                             st.session_state.end_date = datetime.date.fromisoformat(res["end_date"])
-                            st.rerun()
+                        st.session_state.short_promo = res.get("short_promo", st.session_state.short_promo)
+                        st.session_state.badge_promo = res.get("badge_promo", st.session_state.badge_promo)
+                        st.session_state.discount_code = res.get("discount_code", st.session_state.discount_code)
+                        st.session_state.rule_sentence = res.get("rule_sentence", st.session_state.rule_sentence)
+                        st.session_state.exclusion_clause = res.get("exclusion_clause", st.session_state.exclusion_clause)
+                        prog.progress(100, text="✅ 制作完成 (100%)！")
+                        time.sleep(0.2)
+                        prog.empty()
+                        st.session_state.just_generated = True
+                    except Exception as err:
+                        prog.empty()
+                        res = local_regex_parse(smart_input, current_state)
+                        st.session_state.start_date = datetime.date.fromisoformat(res["start_date"])
+                        st.session_state.end_date = datetime.date.fromisoformat(res["end_date"])
+                        st.warning(
+                            f"⚠️ 智能解析服务响应超时或不可用（原因：{err}）。已自动使用本地规则提取日期，建议点开下方「手动微调细节」核对一下优惠文字后再下载。"
+                        )
                 else:
+                    prog.progress(70, text="📝 正在提取日期并排版 (70%)...")
                     res = local_regex_parse(smart_input, current_state)
                     st.session_state.start_date = datetime.date.fromisoformat(res["start_date"])
                     st.session_state.end_date = datetime.date.fromisoformat(res["end_date"])
-                    st.rerun()
+                    prog.progress(100, text="✅ 制作完成 (100%)！")
+                    time.sleep(0.2)
+                    prog.empty()
+                    st.info("ℹ️ 后台尚未配置智能解析密钥，已使用基础规则提取日期；可展开下方「手动微调细节」核对优惠文字。")
 
-    with col_right:
-        with st.container(border=True):
-            st.markdown(
-                '<div class="card-title"><span class="step-badge">STEP 2</span> 内容核对与导出</div>',
-                unsafe_allow_html=True,
+        # 标准文件命名：促销开始日期(YYYYMMDD) + 品牌简称 + promo memo.pptx
+        start_str = st.session_state.start_date.strftime("%Y%m%d")
+        out_filename = f"{start_str} {cfg['code']} promo memo.pptx"
+
+        # 实时生成 PPT 文件字节流并展示下载卡片
+        try:
+            a1_bytes_to_use = uploaded_a1.getvalue() if uploaded_a1 else None
+            ppt_bytes = generate_memo_pptx(
+                brand_key=selected_brand,
+                festival=st.session_state.festival,
+                issue_month_str=st.session_state.issue_month,
+                start_date=st.session_state.start_date,
+                end_date=st.session_state.end_date,
+                short_promo=st.session_state.short_promo,
+                badge_promo=st.session_state.badge_promo,
+                discount_code=st.session_state.discount_code,
+                rule_sentence=st.session_state.rule_sentence,
+                exclusion_clause=st.session_state.exclusion_clause,
+                a1_image_bytes=a1_bytes_to_use,
             )
 
-            c1, c2, c3 = st.columns([1, 1, 0.85])
-            with c1:
-                start_d = st.date_input("开始日期", value=st.session_state.start_date)
-                st.session_state.start_date = start_d
-            with c2:
-                end_d = st.date_input("结束日期", value=st.session_state.end_date)
-                st.session_state.end_date = end_d
-            with c3:
-                issue_m = st.text_input("封面月份", value=st.session_state.issue_month)
-                st.session_state.issue_month = issue_m
-
-            d_preview = format_dates(
-                st.session_state.start_date, st.session_state.end_date, cfg["cover_date_full_year_end"]
+            d_prev = format_dates(st.session_state.start_date, st.session_state.end_date, cfg["cover_date_full_year_end"])
+            a1_status_html = (
+                '<span class="a1-tag-ok">已替换最新上传的 A1 海报（共 2 处）</span>'
+                if uploaded_a1
+                else '<span class="a1-tag-wait">未上传新图（末页暂保留模板原图，出图后可随时重传更新）</span>'
             )
+
             st.markdown(
-                f'<div class="date-pill-bar">'
-                f'<div>封面 <span>{d_preview["dot_cover"]}</span></div>'
-                f'<div>主表 <span>{d_preview["cn_full_dash"]}</span></div>'
-                f'<div>执行日 <span>{d_preview["cn_start_only"]}</span></div>'
-                f'<div>陈列 <span>{d_preview["md_tight_dash"]}</span></div>'
+                f'<div class="result-card">'
+                f'<div class="result-header">📄 已就绪：{out_filename}</div>'
+                f'<div class="result-grid">'
+                f'<div class="result-label">品牌与档期</div><div class="result-val">{cfg["code"]} · {st.session_state.festival}</div>'
+                f'<div class="result-label">活动时间</div><div class="result-val">{d_prev["cn_full_dash"]}（已自动同步全篇 6 处日期）</div>'
+                f'<div class="result-label">主要优惠</div><div class="result-val">{st.session_state.short_promo}（折扣码：{st.session_state.discount_code}）</div>'
+                f'<div class="result-label">核心规则</div><div class="result-val">{st.session_state.rule_sentence}</div>'
+                f'<div class="result-label">A1 海报图</div><div class="result-val">{a1_status_html}</div>'
+                f'</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
+            st.download_button(
+                label=f"📥 立即下载 {out_filename}",
+                data=ppt_bytes,
+                file_name=out_filename,
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                use_container_width=True,
+            )
+        except Exception as gen_err:
+            st.error(f"❌ 生成 PPT 时出现问题：{gen_err}。请检查仓库中的 templates 母版文件是否完整。")
+
+        # 默认折叠的手动微调抽屉（非必填，消除视觉与操作负担）
+        with st.expander("🔧 需要手动微调某处文字或日期？（非必填，点击展开直接改）", expanded=False):
+            st.caption("修改下方任意一项后，上方的绿色预览卡片与下载文件将立即同步更新：")
+            c1, c2, c3 = st.columns([1, 1, 0.85])
+            with c1:
+                new_sd = st.date_input("开始日期", value=st.session_state.start_date)
+                if new_sd != st.session_state.start_date:
+                    st.session_state.start_date = new_sd
+                    st.rerun()
+            with c2:
+                new_ed = st.date_input("结束日期", value=st.session_state.end_date)
+                if new_ed != st.session_state.end_date:
+                    st.session_state.end_date = new_ed
+                    st.rerun()
+            with c3:
+                new_im = st.text_input("封面左下角月份", value=st.session_state.issue_month)
+                if new_im != st.session_state.issue_month:
+                    st.session_state.issue_month = new_im
+                    st.rerun()
+
             c4, c5, c6 = st.columns([1.2, 1.2, 0.7])
             with c4:
-                st.session_state.short_promo = st.text_input("主要优惠简述", value=st.session_state.short_promo)
+                new_sp = st.text_input("主要优惠简述", value=st.session_state.short_promo)
+                if new_sp != st.session_state.short_promo:
+                    st.session_state.short_promo = new_sp
+                    st.rerun()
             with c5:
-                st.session_state.badge_promo = st.text_input("左下角优惠标签", value=st.session_state.badge_promo)
+                new_bp = st.text_input("左下角优惠标签", value=st.session_state.badge_promo)
+                if new_bp != st.session_state.badge_promo:
+                    st.session_state.badge_promo = new_bp
+                    st.rerun()
             with c6:
-                st.session_state.discount_code = st.text_input("折扣代码", value=st.session_state.discount_code)
+                new_dc = st.text_input("折扣代码", value=st.session_state.discount_code)
+                if new_dc != st.session_state.discount_code:
+                    st.session_state.discount_code = new_dc
+                    st.rerun()
 
-            st.session_state.rule_sentence = st.text_area(
-                "优惠规则正文",
-                value=st.session_state.rule_sentence,
-                height=68,
-            )
-            st.session_state.exclusion_clause = st.text_area(
-                "不参与商品及品牌说明",
-                value=st.session_state.exclusion_clause,
-                height=96,
-            )
+            new_rs = st.text_area("优惠规则正文", value=st.session_state.rule_sentence, height=68)
+            if new_rs != st.session_state.rule_sentence:
+                st.session_state.rule_sentence = new_rs
+                st.rerun()
 
-            try:
-                a1_bytes_to_use = uploaded_a1.getvalue() if uploaded_a1 else None
-                ppt_bytes = generate_memo_pptx(
-                    brand_key=selected_brand,
-                    festival=st.session_state.festival,
-                    issue_month_str=st.session_state.issue_month,
-                    start_date=st.session_state.start_date,
-                    end_date=st.session_state.end_date,
-                    short_promo=st.session_state.short_promo,
-                    badge_promo=st.session_state.badge_promo,
-                    discount_code=st.session_state.discount_code,
-                    rule_sentence=st.session_state.rule_sentence,
-                    exclusion_clause=st.session_state.exclusion_clause,
-                    a1_image_bytes=a1_bytes_to_use,
-                )
-
-                today_str = datetime.date.today().strftime("%Y%m%d")
-                out_filename = f"{today_str} {cfg['code']} {st.session_state.festival} promo memo.pptx"
-
-                st.download_button(
-                    label=f"📥 生成并下载 {cfg['code']} Memo ({out_filename})",
-                    data=ppt_bytes,
-                    file_name=out_filename,
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True,
-                    type="primary",
-                )
-            except FileNotFoundError as fnf_err:
-                st.error(str(fnf_err))
+            new_ec = st.text_area("不参与商品及品牌说明", value=st.session_state.exclusion_clause, height=95)
+            if new_ec != st.session_state.exclusion_clause:
+                st.session_state.exclusion_clause = new_ec
+                st.rerun()
 
 
 if __name__ == "__main__":
