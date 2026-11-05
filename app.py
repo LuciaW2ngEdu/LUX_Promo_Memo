@@ -479,7 +479,6 @@ def main():
     st.markdown(
         '<div class="studio-header">'
         '<div><span class="studio-title">👓 促销 Memo 工作台</span>'
-        '<span class="studio-subtitle">自动排版 · 全篇日期联动 · 完美保留品牌母版样式</span></div>'
         '</div>',
         unsafe_allow_html=True,
     )
