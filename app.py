@@ -1,11 +1,10 @@
 import datetime as dt
 import os
 import streamlit as st
-from memo_engine import (BRAND_CONFIG, FIELDS, initial_state, read_memo, local_parse,
-                         ai_parse, validate_state, generate_memo)
+from memo_engine import (BRAND_CONFIG, initial_state, read_memo, local_parse, ai_parse,
+                         validate_state, generate_memo, check_source_brand, BrandMismatch)
 
 st.set_page_config(page_title='促销 Memo 生成器', page_icon='👓', layout='centered')
-
 CSS='''<style>
 .stApp{background:#f6f7f9}.block-container{max-width:820px;padding-top:2rem}
 [data-testid="stVerticalBlockBorderWrapper"]{background:white;border-radius:14px}
@@ -31,73 +30,89 @@ def date_value(value):
 def main():
     st.markdown(CSS,unsafe_allow_html=True)
     st.title('👓 促销 Memo 生成器')
-    st.caption('导入活动内容，核对后生成门店 PPT。')
+    st.caption('文案或 A1 均可，核对后生成门店 PPT。')
     with st.container(border=True):
-        st.subheader('1 · 导入内容')
+        st.subheader('1 · 活动与素材')
         brand=st.selectbox('品牌',list(BRAND_CONFIG),key='brand')
         with st.expander('继续修改已有 Memo（选填）'):
-            st.caption('上传后以这份 PPT 为底稿，保留其他手工调整。不上传则使用品牌标准版。')
+            st.caption('以这份 PPT 为底稿，保留其他手工调整；不上传则使用品牌标准版。')
             ppt=st.file_uploader('已有 Memo',type=['pptx'],key='source_upload')
         source=ppt.getvalue() if ppt else None
         source_id=(brand,source)
         if st.session_state.get('source_id')!=source_id:
-            try:
-                state=read_memo(source,brand) if source else initial_state(brand)
+            try: state=read_memo(source,brand) if source else initial_state(brand)
             except Exception as exc:
                 st.error(str(exc));return
             st.session_state.source_id=source_id
             st.session_state.memo=state
             st.session_state.baseline=dict(state) if source else None
             st.session_state.review=False
+            st.session_state.festival_input=state['festival']
             reset_editor()
-        wording=st.text_area('促销文案 / 修改意见',height=120,key='wording',
-            placeholder='粘贴活动 wording，或输入“门店除奥莱”“优惠不适用于……”。')
-        a1=st.file_uploader('A1 海报（选填，可后补）',type=['png','jpg','jpeg'],key='a1')
+        festival=st.text_input('节日 / 档期（必填）',key='festival_input',placeholder='如：女神节、超级周末；填写实际档期')
+        st.session_state.memo['festival']=festival.strip()
+        required_message=st.empty()
+        st.caption('下面两项至少提供一项，也可一起提交。A1 未出图时先用文案，后续可补图。')
+        a1=st.file_uploader('上传 A1 海报（可单独提交）',type=['png','jpg','jpeg'],key='a1')
+        wording=st.text_area('粘贴促销文案 / 修改意见（只传 A1 时可留空）',height=100,key='wording',
+            placeholder='粘贴 wording，或输入“活动结束日期改为……”“优惠不适用于……”。')
         image=a1.getvalue() if a1 else None
+        st.caption('上传新 A1 后会识别日期、优惠及门店范围，核对后同步更新 PPT 和海报。')
         c1,c2=st.columns([2,1])
         with c1: recognize=st.button('识别并核对 →',type='primary',use_container_width=True)
         with c2: manual=st.button('手动填写',use_container_width=True)
-        if recognize:
-            if not wording.strip() and not image and source is None:
-                st.warning('请粘贴文案、上传海报，或选择手动填写。')
+        if recognize or manual:
+            st.session_state.pop('output',None)
+            if not festival.strip():
+                required_message.error('请先填写节日 / 档期。')
+                st.session_state.review=False
+            elif recognize and not wording.strip() and not image and source is None:
+                st.warning('请上传 A1、粘贴文案，或选择手动填写。')
+                st.session_state.review=False
             else:
-                state=st.session_state.memo
-                key=api_key()
-                if key and (wording.strip() or image):
+                state=dict(st.session_state.memo)
+                state.pop('_meta',None)
+                try: check_source_brand(brand,wording,a1.name if a1 else '')
+                except BrandMismatch as exc:
+                    st.error(str(exc));st.session_state.review=False;return
+                image_read=False
+                warning=''
+                if recognize and api_key() and (wording.strip() or image):
                     try:
-                        with st.spinner('正在识别活动信息…'):
-                            state=ai_parse(key,brand,state,wording,image,a1.type if a1 else 'image/jpeg')
-                        st.session_state.parse_note='已识别，请核对档期、日期与条款；未明确的信息保留底稿内容。'
+                        with st.spinner('正在识别素材中的日期、优惠和适用门店…'):
+                            state=ai_parse(api_key(),brand,state,wording,image,a1.type if a1 else 'image/jpeg')
+                        image_read=bool(image)
+                        st.session_state.parse_note='已提取素材信息。请核对日期、优惠和门店范围。'
+                    except BrandMismatch as exc:
+                        st.error(str(exc));st.session_state.review=False;return
                     except Exception:
-                        try: state=local_parse(wording,state)
-                        except ValueError:
-                            st.error('文案日期无效，请检查后重试。');return
-                        st.session_state.parse_note='智能识别暂不可用，仅尝试提取明确日期和标注字段。海报内容未识别，请手动核对。'
-                elif wording.strip() or image:
+                        warning='智能识别暂不可用。'+('A1 尚未识别，请手动核对日期、优惠和门店范围。' if image else '请手动核对未识别字段。')
+                elif recognize and (wording.strip() or image):
+                    warning='未配置智能识别。'+('A1 尚未识别，请手动核对日期、优惠和门店范围。' if image else '仅提取明确日期和标注字段。')
+                else:
+                    st.session_state.parse_note='请核对需要修改的字段。'
+                if manual or warning or not (wording.strip() or image):
                     try: state=local_parse(wording,state)
                     except ValueError:
                         st.error('文案日期无效，请检查后重试。');return
-                    st.session_state.parse_note='当前未配置智能识别，仅支持明确日期和“档期：…”等标注字段；海报内容请手动填写。'
-                else:
-                    st.session_state.parse_note='已读取现有 Memo，请确认需要修改的字段。'
+                state['festival']=festival.strip()
                 st.session_state.memo=state
                 st.session_state.review=True
                 st.session_state.review_input=(wording,image)
+                st.session_state.parse_warning=warning
+                st.session_state.image_unread=bool(image) and not image_read
+                st.session_state.outlet_identified='exclude_outlets' in state.get('_meta',{}).get('recognized_fields',[])
                 reset_editor()
-        if manual:
-            st.session_state.review=True
-            st.session_state.review_input=(wording,image)
-            st.session_state.parse_note='请填写本次活动信息；商品排除及通用限制来自当前底稿。'
-            reset_editor()
     if not st.session_state.get('review'): return
     if st.session_state.get('review_input') != (wording,image):
-        st.warning('导入内容已变化，请重新识别，或点击“手动填写”继续核对。')
-        return
+        st.session_state.pop('output',None)
+        st.warning('素材已变化，请重新识别；也可选择手动填写。');return
     with st.container(border=True):
-        st.subheader('2 · 核对活动信息')
-        st.caption(st.session_state.get('parse_note',''))
-        state=st.session_state.memo
-        state['festival']=st.text_input('节日 / 档期',value=state['festival'],key='edit_festival',placeholder='如：女神节、Super Weekend（不是海报宣传语）')
+        st.subheader('2 · 核对并生成')
+        if st.session_state.get('parse_warning'): st.warning(st.session_state.parse_warning)
+        else: st.caption(st.session_state.get('parse_note',''))
+        state=dict(st.session_state.memo)
+        state['festival']=festival.strip()
         a,b=st.columns(2)
         with a:
             value=st.date_input('开始日期',value=date_value(state['start_date']),key='edit_start_date')
@@ -107,7 +122,12 @@ def main():
             state['end_date']=value.isoformat() if value else ''
         state['short_promo']=st.text_input('主要优惠',value=state['short_promo'],key='edit_short_promo')
         state['store_scope']=st.text_input('参与门店',value=state['store_scope'],key='edit_store_scope')
-        state['exclude_outlets']=st.checkbox('奥莱不参与',value=state['exclude_outlets'],key='edit_exclude_outlets')
+        state['exclude_outlets']=st.checkbox('奥莱不参与（识别结果，可调整）',value=state['exclude_outlets'],key='edit_exclude_outlets')
+        if st.session_state.get('outlet_identified'):
+            evidence=state.get('_meta',{}).get('outlet_evidence','')
+            st.caption('已从素材识别奥莱范围'+('：'+evidence if evidence else '，此处仅供确认。'))
+        else:
+            st.caption('素材中未识别到明确奥莱规则；当前保留'+('已有 Memo' if source else '品牌标准版')+'的设置，请确认。')
         state['rule_sentence']=st.text_area('优惠规则',value=state['rule_sentence'],key='edit_rule_sentence',height=90)
         state['exclusion_clause']=st.text_area('不参与商品 / 品牌',value=state['exclusion_clause'],key='edit_exclusion_clause',height=110)
         with st.expander('更多设置'):
@@ -119,30 +139,37 @@ def main():
             state['legal_clause']=st.text_area('地域渠道及咨询条款',value=state['legal_clause'],key='edit_legal_clause')
             state['issue_month']=st.text_input('封面落款月份',value=state['issue_month'],key='edit_issue_month')
         st.session_state.memo=state
-        if image: st.caption('A1：生成时替换两处海报，保持原图比例。')
-        elif source: st.caption('A1：保留上传 Memo 中的海报。')
-        else: st.caption('A1：暂用“海报待补充”占位，可稍后上传补图。')
-        # Do not serve an output made from older reviewed fields.
+        if image: st.caption('生成时同步更新活动字段并替换两处 A1，保持图片比例。')
+        elif source: st.caption('保留上传 Memo 中的海报。')
+        else: st.caption('尚无 A1，将使用“海报待补充”占位。')
+        image_confirmed=True
+        if st.session_state.get('image_unread'):
+            image_confirmed=st.checkbox('我已手动核对这张海报的日期、优惠与门店范围',key='edit_image_confirmed')
         if st.session_state.get('output_state') != state:
             st.session_state.pop('output',None)
         if st.button('确认并生成 PPT',type='primary',use_container_width=True):
+            st.session_state.pop('output',None)
             errors=validate_state(state)
+            if not image_confirmed: errors.append('本次海报尚未识别，请先手动核对并确认。')
             if errors:
                 for error in errors: st.error(error)
             else:
+                progress=st.progress(0,text='正在准备生成…')
                 try:
-                    with st.spinner('正在更新 Memo…'):
-                        data,count=generate_memo(brand,state,source,st.session_state.baseline,image)
+                    def update(value,message): progress.progress(value,text=message)
+                    data,count=generate_memo(brand,state,source,st.session_state.baseline,image,progress=update)
                     st.session_state.output=data
                     st.session_state.output_state=dict(state)
                     st.session_state.output_count=count
-                except Exception as exc:
-                    st.error('生成失败：'+str(exc))
+                except Exception as exc: st.error('生成失败：'+str(exc))
+                finally: progress.empty()
         if st.session_state.get('output'):
+            data=st.session_state.output
             name=state['start_date'].replace('-','')+' '+BRAND_CONFIG[brand]['code']+' promo memo.pptx'
-            st.success('Memo 已生成，下载后即可检查。')
-            st.download_button('下载 PPT',st.session_state.output,file_name=name,
+            # Clicking download must not rerun widgets and invalidate the media URL.
+            st.download_button('下载 PPT · '+name,data=data,file_name=name,key='download_memo',on_click='ignore',
                 mime='application/vnd.openxmlformats-officedocument.presentationml.presentation',use_container_width=True)
+            st.success(f'文件已校验并就绪（{len(data)/1024/1024:.1f} MB），请点击上方按钮下载。')
 
 
 if __name__=='__main__': main()
