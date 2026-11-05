@@ -96,7 +96,15 @@ TEXT_FIELDS = set(FIELDS) - {'exclude_outlets', 'start_date', 'end_date'}
 
 
 def template_bytes(brand):
-    return (BASE_DIR / 'templates' / (BRAND_CONFIG[brand]['code'] + '.pptx')).read_bytes()
+    cfg = BRAND_CONFIG[brand]
+    for relative in cfg['candidate_files']:
+        path = BASE_DIR / relative
+        if path.is_file():
+            return path.read_bytes()
+    raise FileNotFoundError(
+        f"未找到 {cfg['code']} 品牌母版。请在 GitHub 仓库中上传 templates/{cfg['code']}.pptx，"
+        f"或将 {cfg['code']}.pptx 放在 app.py 同一目录。"
+    )
 
 
 def slots(prs):
